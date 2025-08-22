@@ -1,0 +1,23 @@
+[
+  {
+    "id": "B300",
+    "author_id": "P081",
+    "code": "99213",
+    "denied_because": "form incomplete",
+    "date_status": "2025-07-18-denied"
+  },
+  {
+    "id": "B301",
+    "author_id": "P091",
+    "code": "D0120",
+    "denied_because": "Prior auth required",
+    "date_status": "2025-07-22-denied"
+  },
+  {
+    "identifier": "B302",
+    "patient": "P092",
+    "procedure_cd": "D0150",
+    "reason": null,
+    "submitted": "2025-07-25-approved"
+  }
+]

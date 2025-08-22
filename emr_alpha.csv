@@ -1,0 +1,8 @@
+claim_id,patient_id,procedure_code,dental_reason,submitted_at_status
+A123,P080,99213,Missing modifier,"2025-07-08,denied"
+A124,P080,99214,Incorrect NPI,"2025-07-10,denied"
+A125,,99215,Authorization expired,"2025-07-05,denied"
+A126,P080,99381,None,"2025-07-15,approved"
+A127,P080,99481,Prior auth required,"2025-07-20,denied"
+A128,P090,99482,Incorrect procedure,"2025-07-12,denied"
+A129,P091,99213,null,"2025-07-09,denied"
