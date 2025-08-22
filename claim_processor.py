@@ -29,34 +29,43 @@ class ClaimProcessor:
             self.logger.info(f"Ingested {len(df)} records from alpha source.")
         except FileNotFoundError:
             self.logger.error(f"File not found: {file_path}")
-            # FIX: Return the empty DataFrame here
             return pd.DataFrame(columns=self.UNIFIED_SCHEMA)
 
         normalized_records = []
         for _, row in df.iterrows():
             try:
+                # Check if submitted_at_status exists and is not null
+                if pd.isna(row.get('submitted_at_status')):
+                    raise ValueError("submitted_at_status is null or missing")
+                
                 # Split the combined 'submitted_at_status' field
-                date_str, status = row['submitted_at_status'].split(',')
+                date_status = str(row['submitted_at_status']).strip()
+                if ',' not in date_status:
+                    raise ValueError(f"submitted_at_status missing comma separator: {date_status}")
+                    
+                date_str, status = date_status.split(',', 1)  # Split on first comma only
+                
                 # Create a normalized record dictionary
                 record = {
-                    "claim_id": str(row['claim_id']).strip(),
-                    "patient_id": str(row['patient_id']).strip() if pd.notna(row['patient_id']) else None,
-                    "procedure_code": str(row['procedure_code']).strip(),
-                    "denial_reason": str(row['dental_reason']).strip().lower() if pd.notna(row['dental_reason']) and str(row['dental_reason']).strip().lower() != 'none' else None,
+                    "claim_id": str(row['claim_id']).strip() if pd.notna(row.get('claim_id')) else None,
+                    "patient_id": str(row['patient_id']).strip() if pd.notna(row.get('patient_id')) else None,
+                    "procedure_code": str(row['procedure_code']).strip() if pd.notna(row.get('procedure_code')) else None,
+                    "denial_reason": str(row['dental_reason']).strip().lower() if pd.notna(row.get('dental_reason')) and str(row['dental_reason']).strip().lower() != 'none' else None,
                     "status": status.strip().lower(),
-                    "submitted_at": pd.to_datetime(date_str).date(),
+                    "submitted_at": pd.to_datetime(date_str.strip()).date(),
                     "source_system": "alpha"
                 }
                 normalized_records.append(record)
-            except (ValueError, KeyError) as e:
-                error_msg = f"Skipping malformed row in alpha source: {row.to_dict()}. Error: {e}"
+            except (ValueError, KeyError, TypeError) as e:
+                error_msg = f"Skipping malformed row in alpha source: {dict(row)}. Error: {e}"
                 self.logger.warning(error_msg)
-                self.failed_records.append({"source": "alpha", "record": row.to_dict(), "error": error_msg})
+                self.failed_records.append({"source": "alpha", "record": dict(row), "error": str(e)})
                 continue
 
         normalized_df = pd.DataFrame(normalized_records)
         self.logger.info(f"Successfully normalized {len(normalized_df)} records from alpha.")
         return normalized_df
+
 
     def ingest_beta(self, file_path: str) -> pd.DataFrame:
         """Ingest and normalize data from the beta EMR source (JSON with inconsistent keys)."""
@@ -142,7 +151,35 @@ class ClaimProcessor:
 
     def is_eligible_for_resubmission(self, record: Dict[str, Any]) -> Tuple[bool, str]:
         """Determine if a single claim record is eligible for resubmission."""
-        # ... (Copy the is_eligible_for_resubmission function, replacing the call to mock_llm_classifier with self.mock_llm_classifier) ...
+        # Rule 1: Status must be 'denied'
+        if record.get('status') != 'denied':
+            return False, "Status not denied"
+
+        # Rule 2: Patient ID must not be null
+        if not record.get('patient_id'):
+            return False, "Null patient_id"
+
+        # Rule 3: Claim must be submitted more than 7 days ago
+        submitted_date = record.get('submitted_at')
+        if not submitted_date:
+            return False, "Missing submission date"
+        
+        if (self.TODAY - submitted_date) <= timedelta(days=7):
+            return False, "Submitted within last 7 days"
+
+        # Rule 4: Check denial reason
+        reason = record.get('denial_reason')
+        if reason in self.RETRYABLE_REASONS:
+            return True, reason
+        elif reason in self.NON_RETRYABLE_REASONS:
+            return False, f"Non-retryable reason: {reason}"
+        else:
+            # Handle ambiguous reasons with a mock classifier
+            classification = self.mock_llm_classifier(reason)
+            if classification == "retryable":
+                return True, f"Ambiguous reason classified as retryable: {reason}"
+            else:
+                return False, f"Ambiguous reason classified as non-retryable: {reason}"
 
     def process_files(self, alpha_path: str, beta_path: str) -> None:
         """Main method to process data from both sources."""
@@ -151,10 +188,18 @@ class ClaimProcessor:
         # Ingest and normalize data
         df_alpha = self.ingest_alpha(alpha_path)
         df_beta = self.ingest_beta(beta_path)
+        
+        # Debug logging to check what's returned
+        self.logger.debug(f"Alpha DF type: {type(df_alpha)}, shape: {df_alpha.shape if hasattr(df_alpha, 'shape') else 'N/A'}")
+        self.logger.debug(f"Beta DF type: {type(df_beta)}, shape: {df_beta.shape if hasattr(df_beta, 'shape') else 'N/A'}")
 
         # Combine data
         self.combined_df = pd.concat([df_alpha, df_beta], ignore_index=True)
         self.logger.info(f"Total records after ingestion and normalization: {len(self.combined_df)}")
+
+        if self.combined_df.empty:
+            self.logger.warning("No data available for processing after ingestion")
+            return
 
         # Apply eligibility logic
         for _, claim in self.combined_df.iterrows():

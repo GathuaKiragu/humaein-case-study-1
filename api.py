@@ -8,7 +8,7 @@ from typing import List
 
 app = FastAPI(title="Claim Resubmission API", description="API for processing EMR data and identifying resubmission candidates")
 
-@app.post("/process-claims/", response_model=List[dict])
+@app.post("/process-claims/")
 async def process_claims(alpha_file: UploadFile = File(...), beta_file: UploadFile = File(...)):
     """
     Process claim files from two EMR sources and return eligible claims for resubmission.
@@ -37,29 +37,31 @@ async def process_claims(alpha_file: UploadFile = File(...), beta_file: UploadFi
         processor = ClaimProcessor()
         processor.process_files(alpha_path, beta_path)
         
-        # Include metrics in the response for better debugging
+        # Include metrics in the response
         metrics = processor.get_metrics()
         response = {
             "candidates": processor.resubmission_candidates,
-            "metrics": metrics
+            "metrics": metrics,
+            "failed_records_count": len(processor.failed_records)
         }
         
         return response
 
     except Exception as e:
-        raise HTTPException(500, f"Error processing files: {str(e)}")
+        # Get more detailed error information
+        import traceback
+        error_detail = f"Error: {str(e)}\nTraceback: {traceback.format_exc()}"
+        raise HTTPException(500, f"Error processing files: {error_detail}")
     
     finally:
-        # Clean up temporary files in finally block to ensure it happens
+        # Clean up temporary files
         for path in [alpha_path, beta_path]:
             if path and os.path.exists(path):
                 try:
                     os.unlink(path)
                 except:
-                    pass  # Don't let cleanup errors mask the original errors
+                    pass
 
-
-                
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
