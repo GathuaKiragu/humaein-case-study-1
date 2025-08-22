@@ -24,21 +24,27 @@ class ClaimProcessor:
 
     def ingest_alpha(self, file_path: str) -> pd.DataFrame:
         """Ingest and normalize data from the alpha EMR source (CSV)."""
-        # ... (Copy the entire ingest_alpha function from pipeline.py here, replacing `logger` with `self.logger`) ...
-        # Remember to update the return statement to use self.UNIFIED_SCHEMA
         try:
             df = pd.read_csv(file_path)
             self.logger.info(f"Ingested {len(df)} records from alpha source.")
         except FileNotFoundError:
             self.logger.error(f"File not found: {file_path}")
+            # FIX: Return the empty DataFrame here
             return pd.DataFrame(columns=self.UNIFIED_SCHEMA)
 
         normalized_records = []
         for _, row in df.iterrows():
             try:
-                # ... (same logic as before) ...
+                # Split the combined 'submitted_at_status' field
+                date_str, status = row['submitted_at_status'].split(',')
+                # Create a normalized record dictionary
                 record = {
-                    # ... (same as before) ...
+                    "claim_id": str(row['claim_id']).strip(),
+                    "patient_id": str(row['patient_id']).strip() if pd.notna(row['patient_id']) else None,
+                    "procedure_code": str(row['procedure_code']).strip(),
+                    "denial_reason": str(row['dental_reason']).strip().lower() if pd.notna(row['dental_reason']) and str(row['dental_reason']).strip().lower() != 'none' else None,
+                    "status": status.strip().lower(),
+                    "submitted_at": pd.to_datetime(date_str).date(),
                     "source_system": "alpha"
                 }
                 normalized_records.append(record)
@@ -54,9 +60,60 @@ class ClaimProcessor:
 
     def ingest_beta(self, file_path: str) -> pd.DataFrame:
         """Ingest and normalize data from the beta EMR source (JSON with inconsistent keys)."""
-        # ... (Copy the entire ingest_beta function from pipeline.py here, making similar changes) ...
-        # Remember to add failed records to self.failed_records in the except block
+        try:
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+            self.logger.info(f"Ingested {len(data)} records from beta source.")
+        except FileNotFoundError:
+            self.logger.error(f"File not found: {file_path}")
+            # FIX: Return the empty DataFrame here
+            return pd.DataFrame(columns=self.UNIFIED_SCHEMA)
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Invalid JSON in file {file_path}: {e}")
+            self.failed_records.append({"source": "beta", "record": "FILE LEVEL ERROR", "error": f"Invalid JSON: {e}"})
+            return pd.DataFrame(columns=self.UNIFIED_SCHEMA)
 
+        normalized_records = []
+        for record in data:
+            try:
+                # Map inconsistent keys to our schema
+                claim_id = record.get('id') or record.get('identifier', '')
+                patient_id = record.get('author_id') or record.get('patient', '')
+                procedure_code = record.get('code') or record.get('procedure_cd', '')
+                denial_reason = record.get('denied_because') or record.get('reason')
+                date_status = record.get('date_status') or record.get('submitted', '')
+
+                # Clean and standardize the data
+                denial_reason = str(denial_reason).strip().lower() if denial_reason is not None and str(denial_reason).strip().lower() != 'none' else None
+                
+                # Split the combined 'date_status' field
+                parts = date_status.split('-')
+                if len(parts) >= 3:
+                    date_str = '-'.join(parts[:3])
+                    status = '-'.join(parts[3:]) if len(parts) > 3 else parts[-1]
+                else:
+                    raise ValueError(f"Invalid date_status format: {date_status}")
+
+                normalized_record = {
+                    "claim_id": str(claim_id).strip(),
+                    "patient_id": str(patient_id).strip() if patient_id else None,
+                    "procedure_code": str(procedure_code).strip(),
+                    "denial_reason": denial_reason,
+                    "status": status.strip().lower(),
+                    "submitted_at": pd.to_datetime(date_str).date(),
+                    "source_system": "beta"
+                }
+                normalized_records.append(normalized_record)
+            except (ValueError, KeyError, AttributeError) as e:
+                error_msg = f"Skipping malformed record in beta source: {record}. Error: {e}"
+                self.logger.warning(error_msg)
+                self.failed_records.append({"source": "beta", "record": record, "error": error_msg})
+                continue
+
+        normalized_df = pd.DataFrame(normalized_records)
+        self.logger.info(f"Successfully normalized {len(normalized_df)} records from beta.")
+        return normalized_df
+    
     def mock_llm_classifier(self, denial_reason: str) -> str:
         """Mock function to simulate an LLM classifying an ambiguous denial reason."""
         # Enhance the mock classifier
