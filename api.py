@@ -19,33 +19,47 @@ async def process_claims(alpha_file: UploadFile = File(...), beta_file: UploadFi
     if beta_file.content_type != 'application/json':
         raise HTTPException(400, "Beta file must be a JSON")
 
+    alpha_path, beta_path = None, None
+    
     try:
         # Save uploaded files to temporary files
         with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as alpha_temp:
-            alpha_temp.write(await alpha_file.read())
+            content = await alpha_file.read()
+            alpha_temp.write(content)
             alpha_path = alpha_temp.name
 
         with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as beta_temp:
-            beta_temp.write(await beta_file.read())
+            content = await beta_file.read()
+            beta_temp.write(content)
             beta_path = beta_temp.name
 
         # Process the files
         processor = ClaimProcessor()
         processor.process_files(alpha_path, beta_path)
         
-        # Clean up temporary files
-        os.unlink(alpha_path)
-        os.unlink(beta_path)
-
-        return processor.resubmission_candidates
+        # Include metrics in the response for better debugging
+        metrics = processor.get_metrics()
+        response = {
+            "candidates": processor.resubmission_candidates,
+            "metrics": metrics
+        }
+        
+        return response
 
     except Exception as e:
-        # Clean up temp files if they exist
-        for path in [alpha_path, beta_path]:
-            if 'path' in locals() and os.path.exists(path):
-                os.unlink(path)
         raise HTTPException(500, f"Error processing files: {str(e)}")
+    
+    finally:
+        # Clean up temporary files in finally block to ensure it happens
+        for path in [alpha_path, beta_path]:
+            if path and os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except:
+                    pass  # Don't let cleanup errors mask the original errors
 
+
+                
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""

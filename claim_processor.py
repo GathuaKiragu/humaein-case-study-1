@@ -66,7 +66,6 @@ class ClaimProcessor:
             self.logger.info(f"Ingested {len(data)} records from beta source.")
         except FileNotFoundError:
             self.logger.error(f"File not found: {file_path}")
-            # FIX: Return the empty DataFrame here
             return pd.DataFrame(columns=self.UNIFIED_SCHEMA)
         except json.JSONDecodeError as e:
             self.logger.error(f"Invalid JSON in file {file_path}: {e}")
@@ -86,13 +85,17 @@ class ClaimProcessor:
                 # Clean and standardize the data
                 denial_reason = str(denial_reason).strip().lower() if denial_reason is not None and str(denial_reason).strip().lower() != 'none' else None
                 
-                # Split the combined 'date_status' field
-                parts = date_status.split('-')
-                if len(parts) >= 3:
-                    date_str = '-'.join(parts[:3])
-                    status = '-'.join(parts[3:]) if len(parts) > 3 else parts[-1]
+                # Split the combined 'date_status' field - FIXED INDENTATION
+                if '-' in date_status:
+                    parts = date_status.split('-')
+                    # Assume the date is in YYYY-MM-DD format (first 3 parts)
+                    if len(parts) >= 3:
+                        date_str = '-'.join(parts[:3])
+                        status = '-'.join(parts[3:]) if len(parts) > 3 else 'unknown'
+                    else:
+                        raise ValueError(f"Invalid date_status format: {date_status}")
                 else:
-                    raise ValueError(f"Invalid date_status format: {date_status}")
+                    raise ValueError(f"Unsupported date_status format: {date_status}")
 
                 normalized_record = {
                     "claim_id": str(claim_id).strip(),
@@ -113,7 +116,8 @@ class ClaimProcessor:
         normalized_df = pd.DataFrame(normalized_records)
         self.logger.info(f"Successfully normalized {len(normalized_df)} records from beta.")
         return normalized_df
-    
+
+
     def mock_llm_classifier(self, denial_reason: str) -> str:
         """Mock function to simulate an LLM classifying an ambiguous denial reason."""
         # Enhance the mock classifier
