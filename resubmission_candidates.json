@@ -1,0 +1,26 @@
+[
+    {
+        "claim_id": "A123",
+        "resubmission_reason": "missing modifier",
+        "source_system": "alpha",
+        "recommended_changes": "Review claim A123 for potential error and resubmit."
+    },
+    {
+        "claim_id": "A124",
+        "resubmission_reason": "incorrect npi",
+        "source_system": "alpha",
+        "recommended_changes": "Review claim A124 for potential error and resubmit."
+    },
+    {
+        "claim_id": "A127",
+        "resubmission_reason": "prior auth required",
+        "source_system": "alpha",
+        "recommended_changes": "Review claim A127 for potential error and resubmit."
+    },
+    {
+        "claim_id": "A128",
+        "resubmission_reason": "Ambiguous reason classified as retryable: incorrect procedure",
+        "source_system": "alpha",
+        "recommended_changes": "Review claim A128 for potential error and resubmit."
+    }
+]
